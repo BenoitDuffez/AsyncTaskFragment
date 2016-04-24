@@ -8,94 +8,106 @@ This will add an invisible fragment to your activity. This fragment calls `setRe
 Usage
 -----
 
-1. Make your activity implement `AsyncTaskFragment.TaskFragmentCallbacks`
-2. Make your activity call `AsyncTaskFragment.attachAsyncTaskFragment(this)` from the `onCreate` method.
-3. Where you need a background task to be run, call `AsyncTaskFragment.runTask()`
+1. Have your activity call `AsyncTaskFragment.attachAsyncTaskFragment(this)` from the `onCreate` method.
+2. Create a static subclass or a dedicated class that extends `AsyncTaskFragment.Task`
+3. Where you need a background task to be run, call `AsyncTaskFragment.runTask(this, new YourTask(yourParam))`
 
 Example
 -------
 
 ```java
-public class ToolsActivity extends SherlockFragmentActivity implements AsyncTaskFragment.TaskFragmentCallbacks {
-	public static final int ACTION_HEADERS = 0;
-	public static final int ACTION_SOCIAL = 1;
-	
+public class MyActivity extends AppCompatActivity {
+	/**
+	 * Create our class that will handle the background processing.
+	 * It has to indicate the types for the activity, parameters, progress and result to the AsyncTaskFragment API
+	 * In this example, the activity class is MyActivity, the parameters are a String, the progress an Integer and the result a Double
+	 */
+	private static class MyClass extends AsyncTaskFragment.Task<MyActivity, String, Integer, Double> {
+		/**
+		 * The constructor takes the parameters of our task
+		 */
+		public MyClass(String string) {
+			super(string);
+		}
+
+		/**
+		 * Called before the background processing has started. Called in the main thread
+		 */
+		@Override
+		public void onPreExecute(MyActivity activity) {
+			// Here you have a pointer to the activity, so you can do something with the views
+			activity.mTextView.setText("We will start background processing shortly");
+		}
+
+		/**
+		 * Called off the main thread
+		 */
+		@Override
+		public Double doInBackground(@NonNull Context applicationContext) {
+			// You have a pointer to the application context, if needed
+			try {
+				Thread.sleep(1000);
+				publishProgress(20);
+				Thread.sleep(1000);
+				publishProgress(40);
+				Thread.sleep(1000);
+				publishProgress(60);
+				Thread.sleep(1000);
+				publishProgress(80);
+				Thread.sleep(1000);
+				publishProgress(100);
+			} catch (InterruptedException e) {
+				e.printStackTrace();
+			}
+			break;
+
+			// the parameter in your constructor is saved into the mParameter field
+			return (double) mParameter.length();
+		}
+
+		/**
+		 * Called on the main thread after the background processing has finished
+		 */
+		@Override
+		public void onPostExecute(@NonNull MyActivity activity, Double result) {
+			// You have the result, and a valid pointer to your activity
+			// If the activity is not available when the background has finished, it will wait for up to 15 seconds for the
+			// activity to be ready
+			activity.mTextView.setText(String.format("The length of the EditText is: %.1f chars", result));
+		}
+
+		/**
+		 * Called on the main thread shortly after the background thread calls publishProgress
+		 * If the activity is gone when the background thread calls publishProgress, the progress will be discarded and the
+		 * background thread will continue to run.
+		 * So this method is not guaranteed to be called all the time
+		 */
+		@Override
+		public void onProgressUpdate(@NonNull MyActivity activity, Integer progress) {
+			activity.mTextView.setText(String.format("Working: %.2f%% done", progress));
+		}
+	}
+
+	public TextView mTextView;
+
 	@Override
 	public void onCreate(final Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
-
-		requestWindowFeature(Window.FEATURE_INDETERMINATE_PROGRESS);
-
-		setContentView(R.layout.activity_tools);
-		getSupportActionBar().setDisplayHomeAsUpEnabled(true);
-
-		setSupportProgressBarIndeterminate(true);
-		setSupportProgressBarIndeterminateVisibility(false);
-
+		setContentView(R.layout.activity);
 		AsyncTaskFragment.attachAsyncTaskFragment(this); // Here we prepare the AsyncTaskFragment, but nothing happened yet
 
+		mTextView = (TextView) findViewById(R.id.result);
 		EditText text = (EditText) findViewById(R.id.text);
 		findViewById(R.id.button).setOnClickListener(new View.OnClickListener() {
 			@Override
 			public void onClick(View view) {
 				// Here we actually trigger the background task
-				AsyncTaskFragment.runTask(getActivity(), ACTION_SOCIAL, text.getText());
+				AsyncTaskFragment.runTask(MyActivity.this, new MyTask(text.getText()));
 			}
 		});
 	}
-
-	@Override
-	public void onPreExecute(int action, Object parameters) {
-		setSupportProgressBarIndeterminateVisibility(true);
-		switch (action) {
-		case ACTION_HEADERS:
-			// prepare some stuff specific to the task 'ACTION_HEADERS'
-			break;
-
-		case ACTION_SOCIAL:
-			// prepare some stuff specific to the task 'ACTION_SOCIAL'
-			break;
-		}
-	}
-
-	@Override
-	public Object doInBackGround(int action, Object parameters) {
-		switch (action) {
-		case ACTION_HEADERS:
-			// background processing for task ACTION_HEADERS
-			break;
-
-		case ACTION_SOCIAL:
-			// that's an example, try to rotate the screen during the background processing
-			try {
-				Thread.sleep(5000);
-			} catch (InterruptedException e) {
-				e.printStackTrace();
-			}
-			break;
-		}
-
-		return null;
-	}
-
-	@Override
-	public void onPostExecute(int action, Object parameters, Object result) {
-		setSupportProgressBarIndeterminateVisibility(false);
-		// here you can update the UI with the results of the background thread work
-
-		switch (action) {
-		case ACTION_HEADERS:
-			break;
-
-		case ACTION_SOCIAL:
-			break;
-		}
-	}
 }
 ```
-
-As you can see, it is possible to launch different tasks which code are in the same activity. The `doInBackGround` method is called off the UI thread so you need to ensure that you don't touch the UI. You can use `onPreExecute` and `onPostExecute` to prepare and update the UI.
-
 
 LICENSE
 =======
@@ -113,6 +125,4 @@ LICENSE
 	WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 	See the License for the specific language governing permissions and
 	limitations under the License.
-
-
 

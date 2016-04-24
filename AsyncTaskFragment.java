@@ -106,7 +106,7 @@ public class AsyncTaskFragment<CallingActivity extends AppCompatActivity> extend
             //noinspection unchecked
             ((AsyncTaskFragment<CallingActivity>) f).run(taskCallbacks);
         } else {
-            throw new IllegalStateException("Your activity must implement TaskFragmentCallbacks and call AsyncTaskFragment.attachAsyncTaskFragment() in its onCreate method.");
+            throw new IllegalStateException("Your activity must call AsyncTaskFragment.attachAsyncTaskFragment() in its onCreate method.");
         }
     }
 

@@ -1,209 +1,288 @@
-package net.bicou.redmine.app;
-
-import android.app.Activity;
 import android.content.Context;
 import android.os.AsyncTask;
 import android.os.Bundle;
+import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
 import android.support.v4.app.Fragment;
 import android.support.v4.app.FragmentManager;
-import android.support.v7.app.ActionBarActivity;
+import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
 
-import java.util.HashMap;
-import java.util.Iterator;
-
 /**
- * Created by bicou on 04/07/13.
+ * Created by Benoit Duffez on 04/07/13.
  * <p/>
- * Used to create an AsyncTask that doesn't leak the activity, but yet it provides the callbacks even when the activity is recreated (e.g. screen rotation)
+ * Used to create an AsyncTask that doesn't leak the activity, but yet it provides the mTask even when the activity is recreated (e.g. screen rotation)
  * <p/>
  * Add the AsyncTaskFragment to your activity:
  * <pre>
- *     class MyAct extends SherlockFragmentActivity implements TaskFragmentCallbacks {
+ *     class MyActivity extends AppCompatActivity {
  *         public void onCreate(Bundle savedInstanceState) {
  *             AsyncTaskFragment.attachAsyncTaskFragment(this);
  *         }
  *
- *         @Override
- *         public void onPreExecute(int action, Object parameters) {
- *             switch (action) {
- *                 case ID_TASK:
- *                     // prepare stuff
- *                     break;
- *                 }
- *             }
- *         }
+ *         // ...
  *
- *         @Override
- *         public void doInBackGround(int action, Object parameters) {
- *             switch (action) {
- *                 case ID_TASK:
- *                     // do the work
- *                     break;
- *                 }
+ *         // Class that will do the background job
+ *         // Declare it as static or in a separate file to ensure that it will not leak the activity
+ *         private static class MyBackgroundTask extends AsyncTaskFragment.TaskFragmentCallbacks<MyActivity, Uri, Integer, Boolean> {
+ *             public RestoreTask(Uri uri) {
+ *                 super(uri);
  *             }
- *         }
  *
- *         @Override
- *         public void onPreExecute(int action, Object parameters) {
- *             switch (action) {
- *                 case ID_TASK:
- *                     // update UI
- *                     break;
- *                 }
+ *             public void onPreExecute(@NonNull RestoreActivity activity) {
+ *                 // you can prepare your activity here
+ *             }
+ *
+ *             public RestoreResult doInBackground(@NonNull Context applicationContext) {
+ *                 // do something in background
+ *                 return null;
+ *             }
+ *
+ *             public void onPostExecute(@NonNull RestoreActivity activity, RestoreResult result) {
+ *                 // back to your activity, do something with the result
+ *                 activity.callSomeMethod(result);
+ *             }
+ *
+ *             public void onProgressUpdate(@NonNull RestoreActivity activity, Integer progress) {
+ *                 // do something with the progress
+ *                 activity.updateProgressBar(progress);
  *             }
  *         }
  *     }
  * </pre>
  * <p/>
- * Then, somewhere:
+ * Then, somewhere in your activity:
  * <pre>
- *     public static final ID_TASK = 0;
- *
- *     // ...
- *
- *     AsyncTaskFragment.runTask(ID_TASK, stuff); // This will call onPreExecute, doInBackGround and onPostExecute from the activity, with stuff as parameters
+ *     AsyncTaskFragment.runTask(this, MyBackgroundTask(uri)); // this is an example with Uri as parameter
  * </pre>
  */
-public class AsyncTaskFragment extends Fragment {
-	public interface TaskFragmentCallbacks {
-		/**
-		 * Called on the UI thread, before the background task is started.
-		 *
-		 * @param action     The action ID, used to select what background task has to be done
-		 * @param parameters The task parameters
-		 */
-		public void onPreExecute(int action, Object parameters);
+public class AsyncTaskFragment<CallingActivity extends AppCompatActivity> extends Fragment {
+    /**
+     * Amount of seconds we allow ourselves to wait for the activity to be created again and the fragment to be attached to it
+     */
+    private static final int ACTIVITY_WAIT_TIME_MAX = 15;
 
-		/**
-		 * The background task. Must return the result data.
-		 *
-		 * @param applicationContext The application Context, that can be used by the background task when a Context is required, and when the Activity may not be
-		 *                           available.
-		 * @param action             The action ID, used to select what background task has to be done
-		 * @param parameters         The task parameters
-		 */
-		public Object doInBackGround(Context applicationContext, int action, Object parameters);
+    /**
+     * Used for the log tag and as a base of other tags/keys
+     */
+    private static final String TAG = AsyncTaskFragment.class.getSimpleName();
 
-		/**
-		 * Called from the UI thread, when the background task is complete
-		 *
-		 * @param action The action ID, used to select what background task has to be done
-		 * @param result The result data of the background task
-		 */
-		public void onPostExecute(int action, Object parameters, Object result);
-	}
+    /**
+     * Our tag in the fragment manager
+     */
+    private static final String FRAGMENT_TAG = TAG + ".TaskFragmentTag";
 
-	private static final String TAG = "AsyncTaskFragment";
-	private static final String FRAGMENT_TAG = "net.bicou.TaskFragmentTag";
-	private TaskFragmentCallbacks mCallbacks;
-	private HashMap<Integer, Object> mTasks = new HashMap<Integer, Object>();
-	private Context mAppContext;
+    /**
+     * This will set to null when the activity is deleted (e.g. screen rotation)
+     */
+    private CallingActivity mActivity;
 
-	public static void attachAsyncTaskFragment(ActionBarActivity activity) {
-		FragmentManager fm = activity.getSupportFragmentManager();
-		AsyncTaskFragment task = new AsyncTaskFragment();
-		task.setArguments(new Bundle());
-		fm.beginTransaction().add(task, FRAGMENT_TAG).commit();
-	}
+    /**
+     * Does not change, because it's not linked to the activity lifecycle
+     */
+    private Context mAppContext;
 
-	/**
-	 * Triggers the callbacks in the activity for a given action.<br /> The activity has to implement TaskFragmentCallbacks.
-	 */
-	public static void runTask(ActionBarActivity activity, int action, Object parameters) {
-		FragmentManager fm = activity.getSupportFragmentManager();
-		Fragment f = fm.findFragmentByTag(FRAGMENT_TAG);
-		if (f != null && f instanceof AsyncTaskFragment) {
-			((AsyncTaskFragment) f).mTasks.put(action, parameters);
-			((AsyncTaskFragment) f).run(action, parameters);
-		} else {
-			throw new IllegalStateException("Your activity must implement TaskFragmentCallbacks and call AsyncTaskFragment.attachAsyncTaskFragment() in its " + 
-					"onCreate method.");
-		}
-	}
+    public static <CallingActivity extends AppCompatActivity> void attachAsyncTaskFragment(CallingActivity activity) {
+        FragmentManager fm = activity.getSupportFragmentManager();
+        if (fm.findFragmentByTag(FRAGMENT_TAG) != null) {
+            return;
+        }
+        AsyncTaskFragment fragment = new AsyncTaskFragment();
+        fragment.setArguments(new Bundle());
+        fm.beginTransaction().add(fragment, FRAGMENT_TAG).commit();
+    }
 
-	@Override
-	public void onCreate(Bundle savedInstanceState) {
-		super.onCreate(savedInstanceState);
-		setRetainInstance(true);
-	}
+    /**
+     * Will create the {@link AsyncTask} in the fragment and call the {@link Task} callbacks
+     *
+     * @param activity      Used to retrieve the {@link AsyncTaskFragment}
+     * @param taskCallbacks Task that will be run in the background
+     */
+    public static <CallingActivity extends AppCompatActivity, Parameters, Progress, Result>
+    void runTask(AppCompatActivity activity, Task<CallingActivity, Parameters, Progress, Result> taskCallbacks) {
+        FragmentManager fm = activity.getSupportFragmentManager();
+        Fragment f = fm.findFragmentByTag(FRAGMENT_TAG);
+        if (f != null && f instanceof AsyncTaskFragment) {
+            //noinspection unchecked
+            ((AsyncTaskFragment<CallingActivity>) f).run(taskCallbacks);
+        } else {
+            throw new IllegalStateException("Your activity must implement TaskFragmentCallbacks and call AsyncTaskFragment.attachAsyncTaskFragment() in its onCreate method.");
+        }
+    }
 
-	@Override
-	public void onAttach(Activity activity) {
-		super.onAttach(activity);
-		if (!(activity instanceof TaskFragmentCallbacks)) {
-			throw new IllegalArgumentException("The activity that attaches a AsyncTaskFragment must implement TaskFragmentCallbacks");
-		}
-		mCallbacks = (TaskFragmentCallbacks) activity;
-		Iterator<Integer> i = mTasks.keySet().iterator();
-		Integer key;
-		while (i.hasNext()) {
-			key = i.next();
-			mCallbacks.onPreExecute(key, mTasks.get(key));
-		}
-		mAppContext = activity.getApplicationContext();
-	}
+    @Override
+    public void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setRetainInstance(true);
+    }
 
-	@Override
-	public void onDetach() {
-		super.onDetach();
-		mCallbacks = null;
-	}
+    @Override
+    public void onAttach(Context context) {
+        super.onAttach(context);
+        //noinspection unchecked
+        mActivity = (CallingActivity) context;
+        mAppContext = context.getApplicationContext();
+    }
 
-	public void run(final int action, final Object parameters) {
-		new AsyncTask<Void, Void, Void>() {
-			Object mObject;
+    @Override
+    public void onDetach() {
+        super.onDetach();
+        mActivity = null;
+    }
 
-			private void waitForCallbacks() {
-				int seconds = 0;
-				while (mCallbacks == null && seconds < 15) {
-					try {
-						Thread.sleep(1000);
-						seconds++;
-					} catch (InterruptedException e) {
-						Log.e(TAG, "Couldn't waitForCallbacks 1 second", null);
-					}
-				}
-			}
+    @SuppressWarnings("unchecked")
+    public <Params, Progress, Result> void run(final Task<CallingActivity, Params, Progress, Result> callbacks) {
+        final AsyncTaskWrapper task = new AsyncTaskWrapper(callbacks, mAppContext, this);
+        callbacks.setAsyncTask(task);
+        task.execute(callbacks.mParameters);
+    }
 
-			@Override
-			protected void onPreExecute() {
-				waitForCallbacks();
-				if (mCallbacks != null) {
-					mCallbacks.onPreExecute(action, parameters);
-				}
-			}
+    /**
+     * This will block the current thread for up to {@link #ACTIVITY_WAIT_TIME_MAX} seconds before giving
+     * If the activity is attached within this period, the wait is cleared.
+     * This ensures the {@link #mActivity} pointer is valid
+     */
+    private void waitForActivity() {
+        int seconds = 0;
+        while (mActivity == null && seconds < ACTIVITY_WAIT_TIME_MAX) {
+            try {
+                Thread.sleep(1000);
+                seconds++;
+            } catch (InterruptedException e) {
+                Log.e(TAG, "Couldn't waitForCallbacks 1 second", null);
+            }
+        }
+    }
 
-			@Override
-			protected Void doInBackground(Void... voids) {
-				waitForCallbacks();
-				if (mCallbacks != null) {
-					mObject = mCallbacks.doInBackGround(mAppContext, action, parameters);
-				}
-				return null;
-			}
+    /**
+     * Wrapper around an {@link AsyncTask} from the framework.
+     *
+     * @param <CallingActivity> The calling activity, which is derived from {@link AppCompatActivity}
+     * @param <Params>          The parameters of the background task
+     * @param <Progress>        The progress that the background task may publish
+     * @param <Result>          The result of the background task
+     */
+    private static class AsyncTaskWrapper<CallingActivity extends AppCompatActivity, Params, Progress, Result> extends AsyncTask<Params, Progress, Result> {
+        @NonNull
+        final Task<CallingActivity, Params, Progress, Result> mTask;
 
-			@Override
-			protected void onCancelled(Void aVoid) {
-				super.onCancelled(aVoid);
-				mTasks.remove(action);
-			}
+        @NonNull
+        final Context mAppContext;
 
-			@Override
-			protected void onCancelled() {
-				super.onCancelled();
-				mTasks.remove(action);
-			}
+        @NonNull
+        final AsyncTaskFragment<CallingActivity> mFragment;
 
-			@Override
-			protected void onPostExecute(Void dummy) {
-				mTasks.remove(action);
-				waitForCallbacks();
-				if (mCallbacks != null) {
-					mCallbacks.onPostExecute(action, parameters, mObject);
-				}
-			}
-		}.execute();
-	}
+        public AsyncTaskWrapper(@NonNull Task<CallingActivity, Params, Progress, Result> task, @NonNull Context appContext, @NonNull AsyncTaskFragment<CallingActivity> fragment) {
+            mTask = task;
+            mAppContext = appContext;
+            mFragment = fragment;
+        }
+
+        @SafeVarargs
+        @Override
+        protected final Result doInBackground(Params... params) {
+            return mTask.doInBackground(mAppContext);
+        }
+
+        @Override
+        protected void onPreExecute() {
+            synchronized (mFragment) {
+                mFragment.waitForActivity();
+                if (mFragment.mActivity != null) {
+                    mTask.onPreExecute(mFragment.mActivity);
+                }
+            }
+        }
+
+        @Override
+        protected void onPostExecute(Result result) {
+            synchronized (mFragment) {
+                mFragment.waitForActivity();
+                if (mFragment.mActivity != null) {
+                    mTask.onPostExecute(mFragment.mActivity, result);
+                }
+            }
+        }
+
+        @SafeVarargs
+        @Override
+        protected final void onProgressUpdate(Progress... params) {
+            synchronized (mFragment) {
+                // we don't wait for the activity here, because during the screen rotation the background task has to continue
+                if (mFragment.mActivity != null) {
+                    final Progress progress = params != null && params.length > 0 ? params[0] : null;
+                    mTask.onProgressUpdate(mFragment.mActivity, progress);
+                }
+            }
+        }
+    }
+
+    /**
+     * Task definition with callbacks
+     *
+     * @param <CallingActivity> The calling activity, which is derived from {@link AppCompatActivity}
+     * @param <Params>          The parameters of your background task
+     * @param <Progress>        The progress that your background task may publish
+     * @param <Result>          The result of your background task
+     */
+    public static abstract class Task<CallingActivity extends AppCompatActivity, Params, Progress, Result> {
+        protected Params mParameters;
+
+        private AsyncTaskWrapper<CallingActivity, Params, Progress, Result> mAsyncTask;
+
+        public Task(Params params) {
+            mParameters = params;
+        }
+
+        /**
+         * Called on the UI thread, before the background task is started.
+         */
+        public abstract void onPreExecute(@NonNull CallingActivity activity);
+
+        /**
+         * The background task. Must return the result data.
+         *
+         * @param applicationContext The application Context, that can be used by the background task when a Context is required, and when the Activity may not be available.
+         */
+        @Nullable
+        public abstract Result doInBackground(@NonNull Context applicationContext);
+
+        /**
+         * Called from the UI thread, when the background task is complete
+         *
+         * @param activity The calling activity
+         * @param result   The result data of the background task
+         */
+        public abstract void onPostExecute(@NonNull CallingActivity activity, @Nullable Result result);
+
+        /**
+         * Called from the UI thread, when the background task has published some progress
+         *
+         * @param activity The calling activity
+         * @param progress The progress of the background task
+         */
+        public abstract void onProgressUpdate(@NonNull CallingActivity activity, @Nullable Progress progress);
+
+        /**
+         * AsyncTaskFragment API: link the {@link AsyncTaskWrapper} and the task together
+         *
+         * @param task The AsyncTask wrapper
+         */
+        public void setAsyncTask(@NonNull AsyncTaskWrapper<CallingActivity, Params, Progress, Result> task) {
+            mAsyncTask = task;
+        }
+
+        /**
+         * Call this from the background thread to publish some progress
+         * This will later call {@link Task#onProgressUpdate(AppCompatActivity, Object)} if the activity exists.
+         *
+         * @param progress The new progress of the background task
+         */
+        protected void publishProgress(Progress progress) {
+            if (mAsyncTask != null) {
+                mAsyncTask.onProgressUpdate(progress);
+            }
+        }
+    }
 }
 

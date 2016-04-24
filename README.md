@@ -17,6 +17,27 @@ Example
 
 ```java
 public class MyActivity extends AppCompatActivity {
+	public TextView mTextView;
+
+	@Override
+	public void onCreate(final Bundle savedInstanceState) {
+		super.onCreate(savedInstanceState);
+		setContentView(R.layout.activity);
+		AsyncTaskFragment.attachAsyncTaskFragment(this); // Here we prepare the AsyncTaskFragment, but nothing happened yet
+
+		mTextView = (TextView) findViewById(R.id.result);
+		final EditText text = (EditText) findViewById(R.id.text);
+		findViewById(R.id.button).setOnClickListener(new View.OnClickListener() {
+			@Override
+			public void onClick(View view) {
+				// Here we actually trigger the background task
+				AsyncTaskFragment.runTask(MyActivity.this, new MyTask(text.getText()));
+			}
+		});
+	}
+
+	// ...
+
 	/**
 	 * Create our class that will handle the background processing.
 	 *
@@ -98,29 +119,6 @@ public class MyActivity extends AppCompatActivity {
 			activity.mTextView.setText(String.format("Working: %.2f%% done", progress));
 		}
 	}
-
-	// now your actual activity code
-
-	public TextView mTextView;
-
-	@Override
-	public void onCreate(final Bundle savedInstanceState) {
-		super.onCreate(savedInstanceState);
-		setContentView(R.layout.activity);
-		AsyncTaskFragment.attachAsyncTaskFragment(this); // Here we prepare the AsyncTaskFragment, but nothing happened yet
-
-		mTextView = (TextView) findViewById(R.id.result);
-		final EditText text = (EditText) findViewById(R.id.text);
-		findViewById(R.id.button).setOnClickListener(new View.OnClickListener() {
-			@Override
-			public void onClick(View view) {
-				// Here we actually trigger the background task
-				AsyncTaskFragment.runTask(MyActivity.this, new MyTask(text.getText()));
-			}
-		});
-	}
-
-	// ...
 }
 ```
 

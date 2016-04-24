@@ -184,6 +184,11 @@ public class AsyncTaskFragment<CallingActivity extends AppCompatActivity> extend
             return mTask.doInBackground(mAppContext);
         }
 
+        @SuppressWarnings("unchecked")
+        public void setProgress(Progress progress) {
+            publishProgress(progress);
+        }
+
         @Override
         protected void onPreExecute() {
             synchronized (mFragment) {
@@ -280,7 +285,7 @@ public class AsyncTaskFragment<CallingActivity extends AppCompatActivity> extend
          */
         protected void publishProgress(Progress progress) {
             if (mAsyncTask != null) {
-                mAsyncTask.onProgressUpdate(progress);
+                mAsyncTask.setProgress(progress);
             }
         }
     }

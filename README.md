@@ -12,6 +12,11 @@ Usage
 2. Create a static subclass or a dedicated class that extends `AsyncTaskFragment.Task`
 3. Where you need a background task to be run, call `AsyncTaskFragment.runTask(this, new YourTask(yourParam))`
 
+Demo
+----
+
+![Demo GIF](https://raw.githubusercontent.com/BenoitDuffez/AsyncTaskFragment/master/demo.gif)
+
 Example
 -------
 

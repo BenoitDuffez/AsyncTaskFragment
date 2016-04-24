@@ -19,8 +19,15 @@ Example
 public class MyActivity extends AppCompatActivity {
 	/**
 	 * Create our class that will handle the background processing.
-	 * It has to indicate the types for the activity, parameters, progress and result to the AsyncTaskFragment API
-	 * In this example, the activity class is MyActivity, the parameters are a String, the progress an Integer and the result a Double
+	 *
+	 * It has to indicate the types for the activity, parameters, progress and
+	 * result to the AsyncTaskFragment API
+	 *
+	 * In this example, the activity class is MyActivity, the parameters are a
+	 * String, the progress an Integer and the result a Double
+	 *
+	 * You have to create this class as a static class, or in its own file.
+	 * Otherwise, your class will have a pointer to your activity and leak it.
 	 */
 	private static class MyClass extends AsyncTaskFragment.Task<MyActivity, String, Integer, Double> {
 		/**
@@ -57,7 +64,7 @@ public class MyActivity extends AppCompatActivity {
 				Thread.sleep(1000);
 				publishProgress(100);
 			} catch (InterruptedException e) {
-				e.printStackTrace();
+				// ...
 			}
 			break;
 
@@ -71,22 +78,28 @@ public class MyActivity extends AppCompatActivity {
 		@Override
 		public void onPostExecute(@NonNull MyActivity activity, Double result) {
 			// You have the result, and a valid pointer to your activity
-			// If the activity is not available when the background has finished, it will wait for up to 15 seconds for the
-			// activity to be ready
+
+			// If the activity is not available when the background has finished, it will wait for
+			// up to 15 seconds for the activity to be ready.
+			// Failure to do so will result to this method never being called
+
 			activity.mTextView.setText(String.format("The length of the EditText is: %.1f chars", result));
 		}
 
 		/**
 		 * Called on the main thread shortly after the background thread calls publishProgress
-		 * If the activity is gone when the background thread calls publishProgress, the progress will be discarded and the
-		 * background thread will continue to run.
-		 * So this method is not guaranteed to be called all the time
+		 * If the activity is gone when the background thread calls publishProgress, the
+		 * progress will be discarded and the background thread will continue to run.
+		 *
+		 * This method is not guaranteed to be called all the times publishProgress is called.
 		 */
 		@Override
 		public void onProgressUpdate(@NonNull MyActivity activity, Integer progress) {
 			activity.mTextView.setText(String.format("Working: %.2f%% done", progress));
 		}
 	}
+
+	// now your actual activity code
 
 	public TextView mTextView;
 
@@ -97,7 +110,7 @@ public class MyActivity extends AppCompatActivity {
 		AsyncTaskFragment.attachAsyncTaskFragment(this); // Here we prepare the AsyncTaskFragment, but nothing happened yet
 
 		mTextView = (TextView) findViewById(R.id.result);
-		EditText text = (EditText) findViewById(R.id.text);
+		final EditText text = (EditText) findViewById(R.id.text);
 		findViewById(R.id.button).setOnClickListener(new View.OnClickListener() {
 			@Override
 			public void onClick(View view) {
@@ -106,6 +119,8 @@ public class MyActivity extends AppCompatActivity {
 			}
 		});
 	}
+
+	// ...
 }
 ```
 
